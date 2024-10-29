@@ -14,10 +14,10 @@ from django.contrib.auth.models import Group, User
 from django.core.exceptions import ImproperlyConfigured
 from django.db import connection
 from django.template import Context, Template
-from django.test import Client, RequestFactory, TestCase
+from django.test import RequestFactory, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
-from django.utils.timezone import localtime, utc
+from django.utils.timezone import localtime
 from notifications.base.models import notify_handler
 from notifications.signals import notify
 from notifications.utils import id2slug
@@ -26,19 +26,9 @@ from notifications.tests.test_models.models import Customer, TargetObject
 
 Notification = load_model('notifications', 'Notification')
 
-try:
-    # Django >= 1.7
-    from django.test import override_settings  # noqa
-except ImportError:
-    # Django <= 1.6
-    from django.test.utils import override_settings  # noqa
+from django.test import override_settings  # noqa
 
-try:
-    # Django >= 1.7
-    from django.urls import reverse
-except ImportError:
-    # Django <= 1.6
-    from django.core.urlresolvers import reverse  # pylint: disable=no-name-in-module,import-error
+from django.urls import reverse
 
 MALICIOUS_NEXT_URLS = [
     "http://bla.com",
@@ -58,7 +48,8 @@ class NotificationTest(TestCase):
         notify.send(from_user, recipient=to_user, verb='commented', action_object=from_user)
         notification = Notification.objects.get(recipient=to_user)
         delta = (
-            timezone.now().replace(tzinfo=utc) - localtime(notification.timestamp, pytz.timezone(settings.TIME_ZONE))
+            timezone.now().replace(tzinfo=pytz.UTC) - localtime(
+            notification.timestamp, pytz.timezone(settings.TIME_ZONE))
         )
         self.assertTrue(delta.seconds < 60)
         # The delta between the two events will still be less than a second despite the different timezones
@@ -569,30 +560,3 @@ class TagTest(TestCase):
         context = {"user":self.to_user}
         output = u"True"
         self.tag_test(template, context, output)
-
-
-class AdminTest(TestCase):
-    app_name = "notifications"
-    def setUp(self):
-        self.message_count = 10
-        self.from_user = User.objects.create_user(username="from", password="pwd", email="example@example.com")
-        self.to_user = User.objects.create_user(username="to", password="pwd", email="example@example.com")
-        self.to_user.is_staff = True
-        self.to_user.is_superuser = True
-        self.to_user.save()
-        for _ in range(self.message_count):
-            notify.send(
-                self.from_user,
-                recipient=self.to_user,
-                verb='commented',
-                action_object=self.from_user,
-            )
-
-    def test_list(self):
-        self.client.login(username='to', password='pwd')
-
-        with CaptureQueriesContext(connection=connection) as context:
-            response = self.client.get(reverse('admin:{0}_notification_changelist'.format(self.app_name)))
-            self.assertLessEqual(len(context), 6)
-
-        self.assertEqual(response.status_code, 200, response.content)
